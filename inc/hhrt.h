@@ -12,4 +12,13 @@ struct hhrt_item{
 	int flag;
 };
 
+struct hhrt_table{
+	int pos;
+	struct hhrt_item item_arr[HHRT_SIZE];
+};
+
+int gen_hhrt_id(struct hhrt_table *hhrt);
+int insert_hhrt(struct hhrt_table *hhrt, int pos, int o_id, struct sockaddr_in *c_addr);
+
+int lookup_hhrt(struct hhrt_table *hhrt, int pos, struct hhrt_item *item);
 #endif

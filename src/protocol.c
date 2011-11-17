@@ -257,6 +257,20 @@ int get_msg_id(const uint8_t *buffer, int len)
 	return header.id;
 }
 
+int set_msg_id(uint8_t *buffer, int len, int id)
+{
+	struct msg_header *header = (struct msg_header *)buffer;
+
+	header->id = htons(id);
+	return header->id;
+}
+
+int msg_is_req(const uint8_t *buffer, int len)
+{
+	struct msg_header *header = (struct msg_header *)buffer;
+	return MSG_IS_QUERY(header->flag);
+}
+
 int verify_packet(const uint8_t *buffer, int len)
 {
 	// return code

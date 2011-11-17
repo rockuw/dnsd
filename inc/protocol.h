@@ -55,6 +55,16 @@ struct dns_msg{
 // ret: id
 int get_msg_id(const uint8_t *buffer, int len);
 
+// set request id
+// arg: buffer, buffer len, msg id
+// ret: status code
+int set_msg_id(uint8_t *buffer, int len, int id);
+
+// determines whether the msg is a request
+// arg: buffer, buffer len
+// ret: 1 or 0
+int msg_is_req(const uint8_t *buffer, int len);
+
 // verify the packet is a valid dns message
 // arg: buffer, buffer length
 // ret: status code, 0 for OK, < 0 for sever error, > 0 warning
