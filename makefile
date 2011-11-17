@@ -7,8 +7,8 @@ CC=gcc
 .c.o:
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o obj/$@
 
-main: hhrt.o req_queue.o main.o protocol.o
-	$(CC) $(CFLAGS) $(INCLUDES) obj/hhrt.o obj/req_queue.o obj/main.o obj/protocol.o -o bin/$@ $(LIBS)
+main: hhrt.o req_queue.o main.o protocol.o util.o
+	$(CC) $(CFLAGS) $(INCLUDES) obj/hhrt.o obj/req_queue.o obj/main.o obj/protocol.o obj/util.o -o bin/$@ $(LIBS)
 
 clean:
 	cd obj && rm *.o

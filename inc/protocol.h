@@ -18,7 +18,7 @@ struct msg_header{
 	uint16_t ar_count;
 };
 
-#define MSG_IS_QUERY(h) ((h & 0x8000) != 0)
+#define MSG_IS_QUERY(h) ((h & 0x8000) == 0)
 #define MSG_OPCODE(h) ((h & 0x7800) >> 11)
 #define MSG_IS_AUTH(h) ((h & 0x0400) != 0)
 #define MSG_IS_TRUNCATED(h) ((h & 0x0200) != 0)

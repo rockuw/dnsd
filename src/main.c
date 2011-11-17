@@ -1,6 +1,7 @@
 #include "req_queue.h"
 #include "protocol.h"
 #include "hhrt.h"
+#include "util.h"
 #include <sys/types.h>
 #include <sys/mman.h>
 #include <sys/ipc.h>
@@ -26,6 +27,9 @@ struct sockaddr_in g_saddr;
 
 void init_shm()
 {
+	struct req_queue *queue;
+	struct hhrt_table *hhrt;
+
 	int shmid;
 	// create shared memory for req queue
 	if((shmid = shm_open(SHM_RQ_NAME, O_CREAT | O_RDWR, 0666)) < 0){
@@ -36,6 +40,11 @@ void init_shm()
 		perror("ftruncate");
 		exit(1);
 	}
+	if((queue = mmap(NULL, sizeof(struct req_queue), PROT_WRITE, MAP_SHARED, shmid, 0)) == (void *)(-1)){
+		perror("mmap");
+		exit(1);
+	}
+	queue->in = queue->out = 0;
 
 	// create shared memory for hhrt
 	if((shmid = shm_open(SHM_HHRT_NAME, O_CREAT | O_RDWR, 0666)) < 0){
@@ -46,6 +55,11 @@ void init_shm()
 		perror("ftruncate");
 		exit(1);
 	}
+	if((hhrt = mmap(NULL, sizeof(struct hhrt_table), PROT_WRITE, MAP_SHARED, shmid, 0)) == (void *)(-1)){
+		perror("mmap");
+		exit(1);
+	}
+	hhrt->pos = 0;
 }
 
 void init_socket()
@@ -71,22 +85,18 @@ void init_sem()
 	sem_t *sem_empty; 
 	sem_t *sem_full;
 	sem_t *sem_mutex;
-	if((sem_empty = sem_open(SEM_EMPTY, O_CREAT)) == SEM_FAILED){
+	if((sem_empty = sem_open(SEM_EMPTY, O_CREAT, 0666, REQ_QUEUE_SIZE)) == SEM_FAILED){
 		perror("sem_open");
 		exit(1);
 	}
-	if((sem_full = sem_open(SEM_FULL, O_CREAT)) == SEM_FAILED){
+	if((sem_full = sem_open(SEM_FULL, O_CREAT, 0666, 0)) == SEM_FAILED){
 		perror("sem_open");
 		exit(1);
 	}
-	if((sem_mutex = sem_open(SEM_MUTEX, O_CREAT)) == SEM_FAILED){
+	if((sem_mutex = sem_open(SEM_MUTEX, O_CREAT, 0666, 1)) == SEM_FAILED){
 		perror("sem_open");
 		exit(1);
 	}
-
-	sem_init(sem_empty, SEM_PSHARED, REQ_QUEUE_SIZE);
-	sem_init(sem_full, SEM_PSHARED, 0);
-	sem_init(sem_mutex, SEM_PSHARED, 1);
 }
 
 void *recver_entry(void *arg)
@@ -96,13 +106,20 @@ void *recver_entry(void *arg)
 	int tmp, shmid, len;
 	struct req_queue *queue;
 	socklen_t fromlen;
+	sem_t *sem_empty, *sem_full;
 
 	// debug
 	printf("recver running...\n");
 
 	// init semaphore
-	sem_t *sem_empty = sem_open(SEM_EMPTY, 0);
-	sem_t *sem_full = sem_open(SEM_FULL, 0);
+	if((sem_empty = sem_open(SEM_EMPTY, 0)) == SEM_FAILED){
+		perror("sem_open");
+		exit(1);
+	}
+	if((sem_full = sem_open(SEM_FULL, 0)) == SEM_FAILED){
+		perror("sem_open");
+		exit(1);
+	}
 
 	// init shared memory
 	if((shmid = shm_open(SHM_RQ_NAME, O_RDWR, 0666)) < 0){
@@ -140,6 +157,7 @@ void *worker_entry(void *arg)
 	int shmid, hh_id, old_id;
 	struct req_queue *queue;
 	struct hhrt_table *hhrt;
+	sem_t *sem_empty, *sem_full, *sem_mutex;
 
 	// debug
 	printf("worker running...\n");
@@ -151,9 +169,18 @@ void *worker_entry(void *arg)
 	inet_pton(AF_INET, ns_server, &ns_addr.sin_addr.s_addr);
 
 	// init semaphore
-	sem_t *sem_empty = sem_open(SEM_EMPTY, 0);
-	sem_t *sem_full = sem_open(SEM_FULL, 0);
-	sem_t *sem_mutex = sem_open(SEM_MUTEX, 0);
+	if((sem_empty = sem_open(SEM_EMPTY, 0)) == SEM_FAILED){
+		perror("sem_open");
+		exit(1);
+	}
+	if((sem_full = sem_open(SEM_FULL, 0)) == SEM_FAILED){
+		perror("sem_open");
+		exit(1);
+	}
+	if((sem_mutex = sem_open(SEM_MUTEX, 0)) == SEM_FAILED){
+		perror("sem_open");
+		exit(1);
+	}
 
 	// init shared memory
 	if((shmid = shm_open(SHM_RQ_NAME, O_RDWR, 0666)) < 0){
@@ -193,6 +220,7 @@ void *worker_entry(void *arg)
 			// send to NS
 			if(sendto(g_skt, wrapper.buffer, wrapper.len, 0, (struct sockaddr *)&ns_addr, sizeof(struct sockaddr)) != wrapper.len){
 				perror("sendto");
+				printf("to ns wrapper.len = %d\n", wrapper.len);
 				continue;
 			}
 		} else {
@@ -204,6 +232,7 @@ void *worker_entry(void *arg)
 			// send to client
 			if(sendto(g_skt, wrapper.buffer, wrapper.len, 0, (struct sockaddr *)&(hh_req.clnt_addr), sizeof(struct sockaddr)) != wrapper.len){
 				perror("sendto");
+				printf("to clnt wrapper.len = %d\n", wrapper.len);
 				continue;
 			}
 		}
@@ -213,6 +242,7 @@ void *worker_entry(void *arg)
 int main()
 {
 	pthread_t recv_thread, worker_thread;
+	pthread_t worker1, worker2;
 
 	init_socket();
 	init_shm();
@@ -220,8 +250,12 @@ int main()
 	
 	pthread_create(&recv_thread, NULL, recver_entry, NULL);
 	pthread_create(&worker_thread, NULL, worker_entry, NULL);
+	pthread_create(&worker1, NULL, worker_entry, NULL);
+	pthread_create(&worker2, NULL, worker_entry, NULL);
 
 	pthread_join(recv_thread, NULL);
 	pthread_join(worker_thread, NULL);
+	pthread_join(worker1, NULL);
+	pthread_join(worker2, NULL);
 	return 0;
 }
