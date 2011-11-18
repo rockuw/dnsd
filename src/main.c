@@ -289,7 +289,7 @@ void *worker_entry(void *arg)
 			/*----------------------*/
 				// add black list lookup
 			get_msg_domain(wrapper.buffer, wrapper.len, domain);
-			if(blist_lookup(blist, domain) >= 0){
+			if(blist_lookup(blist, domain) == 0){
 				len = make_error_resp(buffer, UDP_MSG_SIZE);
 				set_msg_id(buffer, len, old_id);
 
@@ -328,6 +328,7 @@ int main()
 {
 	pthread_t recv_thread;
 	pthread_t worker_threads[WORKER_NUMBER];
+	int worker_numbers[WORKER_NUMBER];
 	int i;
 
 	init_socket();
@@ -335,11 +336,12 @@ int main()
 	init_sem();
 	init_req_queue();
 	init_hhrt();
-	init_blist("../black.list");
+	init_blist("black.list");
 	
 	pthread_create(&recv_thread, NULL, recver_entry, NULL);
 	for(i = 0; i < WORKER_NUMBER; i ++){
-		pthread_create(&worker_threads[i], NULL, worker_entry, &i);
+		worker_numbers[i] = i;
+		pthread_create(&worker_threads[i], NULL, worker_entry, &worker_numbers[i]);
 	}
 
 	pthread_join(recv_thread, NULL);
