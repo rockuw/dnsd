@@ -50,6 +50,16 @@ struct dns_msg{
 	struct dns_rdata *additional;
 };
 
+// make an error DNS response
+// arg: buffer, buffer len
+// ret: buffer length (send len)
+int make_error_resp(uint8_t *buffer, int len);
+
+// get request domain name
+// arg: buffer, buffer len
+// ret: status code
+int get_msg_domain(const uint8_t *buffer, int len, char *domain);
+
 // get request id
 // arg: buffer, buffer len
 // ret: id

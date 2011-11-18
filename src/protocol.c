@@ -250,6 +250,27 @@ int get_dns_rdata(const uint8_t *packet, const uint8_t *buffer, int len, struct 
 	return oct_offset;
 }
 
+int make_error_resp(uint8_t *buffer, int len)
+{
+	static struct msg_header header;
+	header.id = 0;
+	header.flag = 0x8185; // resp, RD, RA, RCODE=5
+	header.qd_count = 0;
+	header.an_count = 0;
+	header.ns_count = 0;
+	header.ar_count = 0;
+	set_dns_header(&header, buffer, len);
+	return sizeof(struct msg_header);
+}
+
+int get_msg_domain(const uint8_t *buffer, int len, char *domain)
+{
+	static struct dns_msg request;
+	get_request(buffer, len, &request);
+	strcpy(domain, (char *)(request.question->qname));
+	return 0;
+}
+
 int get_msg_id(const uint8_t *buffer, int len)
 {
 	struct msg_header header;

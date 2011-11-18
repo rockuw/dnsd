@@ -2,6 +2,7 @@
 #include "protocol.h"
 #include "hhrt.h"
 #include "util.h"
+#include "black_list.h"
 #include <sys/types.h>
 #include <sys/mman.h>
 #include <sys/ipc.h>
@@ -14,9 +15,11 @@
 #include <stdio.h>
 #include <string.h>
 
+#define WORKER_NUMBER	3
 #define RECV_BUFFER_SIZE 1024
-#define SHM_RQ_NAME "/req_shm"		// key for request queue
-#define SHM_HHRT_NAME "/hhrt_shm"	// key for half handled request table
+#define SHM_RQ_NAME "/req_shm"		// name for request queue
+#define SHM_HHRT_NAME "/hhrt_shm"	// name for half handled request table
+#define SHM_BLIST_NAME "/blist_shm"	// name for black list
 #define SEM_PSHARED 1				// for sem shared between processes
 #define SEM_MUTEX "/dnsd_sem_mutex"		// sem name for mutex
 #define SEM_EMPTY "/dnsd_sem_empty"		// sem name for empty
@@ -27,9 +30,6 @@ struct sockaddr_in g_saddr;
 
 void init_shm()
 {
-	struct req_queue *queue;
-	struct hhrt_table *hhrt;
-
 	int shmid;
 	// create shared memory for req queue
 	if((shmid = shm_open(SHM_RQ_NAME, O_CREAT | O_RDWR, 0666)) < 0){
@@ -40,12 +40,6 @@ void init_shm()
 		perror("ftruncate");
 		exit(1);
 	}
-	if((queue = mmap(NULL, sizeof(struct req_queue), PROT_WRITE, MAP_SHARED, shmid, 0)) == (void *)(-1)){
-		perror("mmap");
-		exit(1);
-	}
-	queue->in = queue->out = 0;
-
 	// create shared memory for hhrt
 	if((shmid = shm_open(SHM_HHRT_NAME, O_CREAT | O_RDWR, 0666)) < 0){
 		perror("shm_open");
@@ -55,11 +49,15 @@ void init_shm()
 		perror("ftruncate");
 		exit(1);
 	}
-	if((hhrt = mmap(NULL, sizeof(struct hhrt_table), PROT_WRITE, MAP_SHARED, shmid, 0)) == (void *)(-1)){
-		perror("mmap");
+	// create shared memory for blist
+	if((shmid = shm_open(SHM_BLIST_NAME, O_CREAT | O_RDWR, 0666)) < 0){
+		perror("shm_open");
 		exit(1);
 	}
-	hhrt->pos = 0;
+	if(ftruncate(shmid, sizeof(struct black_list)) < 0){
+		perror("ftruncate");
+		exit(1);
+	}
 }
 
 void init_socket()
@@ -97,6 +95,68 @@ void init_sem()
 		perror("sem_open");
 		exit(1);
 	}
+}
+
+int init_req_queue()
+{
+	struct req_queue *queue;
+	int shmid;
+
+	if((shmid = shm_open(SHM_RQ_NAME, O_RDWR, 0666)) < 0){
+		perror("shm_open");
+		exit(1);
+	}
+	if((queue = mmap(NULL, sizeof(struct req_queue), PROT_WRITE, MAP_SHARED, shmid, 0)) == (void *)(-1)){
+		perror("mmap");
+		exit(1);
+	}
+	queue->in = queue->out = 0;
+	return 0;
+}
+
+int init_hhrt()
+{
+	struct hhrt_table *hhrt;
+	int shmid;
+
+	if((shmid = shm_open(SHM_HHRT_NAME, O_RDWR, 0666)) < 0){
+		perror("shm_open");
+		exit(1);
+	}
+	if((hhrt = mmap(NULL, sizeof(struct hhrt_table), PROT_WRITE, MAP_SHARED, shmid, 0)) == (void *)(-1)){
+		perror("mmap");
+		exit(1);
+	}
+	hhrt->pos = 0;
+	return 0;
+}
+
+int init_blist(const char *filename)
+{
+	struct black_list *blist;
+	FILE *fp = NULL;
+	int shmid;
+	static char domain[NAME_SIZE];
+
+	if((shmid = shm_open(SHM_BLIST_NAME, O_RDWR, 0666)) < 0){
+		perror("shm_open");
+		exit(1);
+	}
+	if((blist = mmap(NULL, sizeof(struct black_list), PROT_WRITE, MAP_SHARED, shmid, 0)) == (void *)(-1)){
+		perror("mmap");
+		exit(1);
+	}
+	blist_init(blist);
+
+	if((fp = fopen(filename, "r")) == NULL){
+		perror("fopen");
+		exit(1);
+	}
+	while(fscanf(fp, "%s", domain) == 1){
+		blist_insert(blist, domain);
+	}
+	fclose(fp);
+	return 0;
 }
 
 void *recver_entry(void *arg)
@@ -157,10 +217,15 @@ void *worker_entry(void *arg)
 	int shmid, hh_id, old_id;
 	struct req_queue *queue;
 	struct hhrt_table *hhrt;
+	struct black_list *blist;
 	sem_t *sem_empty, *sem_full, *sem_mutex;
+	int worker_number = *((int *)arg);
+	static uint8_t buffer[UDP_MSG_SIZE];
+	static char domain[NAME_SIZE];
+	int len;
 
 	// debug
-	printf("worker running...\n");
+	printf("worker #%d running...\n", worker_number);
 
 	// init NS addr
 	memset((void *)&ns_addr, 0, sizeof(ns_addr));
@@ -201,6 +266,15 @@ void *worker_entry(void *arg)
 		exit(1);
 	}
 
+	if((shmid = shm_open(SHM_BLIST_NAME, O_RDWR, 0666)) < 0){
+		perror("shm_open");
+		exit(1);
+	}
+	if((blist = mmap(NULL, sizeof(struct black_list), PROT_WRITE, MAP_SHARED, shmid, 0)) == (void *)(-1)){
+		perror("mmap");
+		exit(1);
+	}
+
 	while(1){
 		sem_wait(sem_full);
 			sem_wait(sem_mutex);
@@ -211,10 +285,21 @@ void *worker_entry(void *arg)
 
 		if(msg_is_req(wrapper.buffer, wrapper.len)){
 			// msg is a request
+			old_id = get_msg_id(wrapper.buffer, wrapper.len);
 			/*----------------------*/
 				// add black list lookup
+			get_msg_domain(wrapper.buffer, wrapper.len, domain);
+			if(blist_lookup(blist, domain) >= 0){
+				len = make_error_resp(buffer, UDP_MSG_SIZE);
+				set_msg_id(buffer, len, old_id);
+
+				if(sendto(g_skt, buffer, len, 0, (struct sockaddr *)(&wrapper.clnt_addr), sizeof(struct sockaddr)) != len){
+					perror("sendto");
+				}
+				continue;
+			}
+
 			/*----------------------*/
-			old_id = get_msg_id(wrapper.buffer, wrapper.len);
 			insert_hhrt(hhrt, hh_id, old_id, &(wrapper.clnt_addr));
 			set_msg_id(wrapper.buffer, wrapper.len, hh_id);
 			// send to NS
@@ -241,21 +326,25 @@ void *worker_entry(void *arg)
 
 int main()
 {
-	pthread_t recv_thread, worker_thread;
-	pthread_t worker1, worker2;
+	pthread_t recv_thread;
+	pthread_t worker_threads[WORKER_NUMBER];
+	int i;
 
 	init_socket();
 	init_shm();
 	init_sem();
+	init_req_queue();
+	init_hhrt();
+	init_blist("../black.list");
 	
 	pthread_create(&recv_thread, NULL, recver_entry, NULL);
-	pthread_create(&worker_thread, NULL, worker_entry, NULL);
-	pthread_create(&worker1, NULL, worker_entry, NULL);
-	pthread_create(&worker2, NULL, worker_entry, NULL);
+	for(i = 0; i < WORKER_NUMBER; i ++){
+		pthread_create(&worker_threads[i], NULL, worker_entry, &i);
+	}
 
 	pthread_join(recv_thread, NULL);
-	pthread_join(worker_thread, NULL);
-	pthread_join(worker1, NULL);
-	pthread_join(worker2, NULL);
+	for(i = 0; i < WORKER_NUMBER; i ++){
+		pthread_join(worker_threads[i], NULL);
+	}
 	return 0;
 }
