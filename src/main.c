@@ -289,7 +289,7 @@ void *worker_entry(void *arg)
 			/*----------------------*/
 				// add black list lookup
 			get_msg_domain(wrapper.buffer, wrapper.len, domain);
-			if(blist_lookup(blist, domain) == 0){
+			if(blist_lookup(blist, domain) >= 0){
 				len = make_error_resp(buffer, UDP_MSG_SIZE);
 				set_msg_id(buffer, len, old_id);
 

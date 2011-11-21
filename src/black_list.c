@@ -8,8 +8,9 @@ int str_hash(const char *str)
 {
 	unsigned long hash = 5381;
 	int c;
-	while((c = *str++) != 0)
+	while((c = *str++) != 0){
 		hash = ((hash << 5) + hash) + c;
+	}
 	
 	return hash % BLIST_SIZE;
 }
@@ -85,6 +86,9 @@ int blist_insert(struct black_list *blist, const char *domain)
 
 	i = 1;
 	while(i < MAX_PROBE_TIMES &&entry->flag == 1){
+		if(str_matcher(entry->domain, domain) == 0){ // if record already exists
+			break;
+		}
 		h = hash_probe(h, i);
 		entry = blist->item_arr + h;
 		i ++;

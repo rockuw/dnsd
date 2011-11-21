@@ -4,11 +4,21 @@ INCLUDES=-I inc
 LIBS=-lrt -pthread
 CC=gcc
 
+# dir for objects
+OBJ=obj
+# dir for includes
+INC=inc
+# dir for sources
+SRC=src
+# dir for bin
+BIN=bin
+
 .c.o:
-	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o obj/$@
+	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $(OBJ)/$@
 
 main: hhrt.o req_queue.o main.o protocol.o util.o black_list.o
-	$(CC) $(CFLAGS) $(INCLUDES) obj/hhrt.o obj/req_queue.o obj/main.o obj/protocol.o obj/util.o obj/black_list.o -o bin/$@ $(LIBS)
+	cd $(OBJ); \
+	$(CC) $(CFLAGS) $(INCLUDES) hhrt.o req_queue.o main.o protocol.o util.o black_list.o -o ../$(BIN)/$@ $(LIBS)
 
 clean:
 	cd obj && rm *.o
