@@ -265,9 +265,9 @@ int make_error_resp(uint8_t *buffer, int len)
 
 int get_msg_domain(const uint8_t *buffer, int len, char *domain)
 {
-	static struct dns_msg request;
-	get_request(buffer, len, &request);
-	strcpy(domain, (char *)(request.question->qname));
+	static char q_name[NAME_SIZE];
+	label_to_text(buffer + sizeof(struct msg_header), q_name);
+	strcpy(domain, q_name);
 	return 0;
 }
 
