@@ -60,6 +60,19 @@ void init_shm()
 	}
 }
 
+void get_shm_by_name(void **p, const char *name, int size)
+{
+	int shmid;
+	if((shmid = shm_open(name, O_RDWR, 0666)) < 0){
+		perror("shm_open");
+		exit(1);
+	}
+	if(((*p) = mmap(NULL, size, PROT_WRITE, MAP_SHARED, shmid, 0)) == (void *)(-1)){
+		perror("mmap");
+		exit(1);
+	}
+}
+
 void init_socket()
 {
 	memset((void *)&g_saddr, 0, sizeof(g_saddr));
@@ -74,6 +87,14 @@ void init_socket()
 	
 	if(bind(g_skt, (struct sockaddr *)&g_saddr, sizeof(struct sockaddr)) != 0){
 		perror("bind");
+		exit(1);
+	}
+}
+
+void get_sem_by_name(sem_t **sem, const char *name)
+{
+	if(((*sem) = sem_open(name, 0)) == SEM_FAILED){
+		perror("sem_open");
 		exit(1);
 	}
 }
@@ -100,16 +121,8 @@ void init_sem()
 int init_req_queue()
 {
 	struct req_queue *queue;
-	int shmid;
 
-	if((shmid = shm_open(SHM_RQ_NAME, O_RDWR, 0666)) < 0){
-		perror("shm_open");
-		exit(1);
-	}
-	if((queue = mmap(NULL, sizeof(struct req_queue), PROT_WRITE, MAP_SHARED, shmid, 0)) == (void *)(-1)){
-		perror("mmap");
-		exit(1);
-	}
+	get_shm_by_name((void **)&queue, SHM_RQ_NAME, sizeof(struct req_queue));
 	queue->in = queue->out = 0;
 	return 0;
 }
@@ -117,16 +130,8 @@ int init_req_queue()
 int init_hhrt()
 {
 	struct hhrt_table *hhrt;
-	int shmid;
 
-	if((shmid = shm_open(SHM_HHRT_NAME, O_RDWR, 0666)) < 0){
-		perror("shm_open");
-		exit(1);
-	}
-	if((hhrt = mmap(NULL, sizeof(struct hhrt_table), PROT_WRITE, MAP_SHARED, shmid, 0)) == (void *)(-1)){
-		perror("mmap");
-		exit(1);
-	}
+	get_shm_by_name((void **)&hhrt, SHM_HHRT_NAME, sizeof(struct hhrt_table));
 	hhrt->pos = 0;
 	return 0;
 }
@@ -135,17 +140,9 @@ int init_blist(const char *filename)
 {
 	struct black_list *blist;
 	FILE *fp = NULL;
-	int shmid;
 	static char domain[NAME_SIZE];
 
-	if((shmid = shm_open(SHM_BLIST_NAME, O_RDWR, 0666)) < 0){
-		perror("shm_open");
-		exit(1);
-	}
-	if((blist = mmap(NULL, sizeof(struct black_list), PROT_WRITE, MAP_SHARED, shmid, 0)) == (void *)(-1)){
-		perror("mmap");
-		exit(1);
-	}
+	get_shm_by_name((void **)&blist, SHM_BLIST_NAME, sizeof(struct black_list));
 	blist_init(blist);
 
 	if((fp = fopen(filename, "r")) == NULL){
@@ -163,7 +160,7 @@ void *recver_entry(void *arg)
 {
 	static uint8_t buffer[RECV_BUFFER_SIZE];
 	struct sockaddr_in c_addr;
-	int tmp, shmid, len;
+	int tmp, len;
 	struct req_queue *queue;
 	socklen_t fromlen;
 	sem_t *sem_empty, *sem_full;
@@ -172,24 +169,11 @@ void *recver_entry(void *arg)
 	printf("recver running...\n");
 
 	// init semaphore
-	if((sem_empty = sem_open(SEM_EMPTY, 0)) == SEM_FAILED){
-		perror("sem_open");
-		exit(1);
-	}
-	if((sem_full = sem_open(SEM_FULL, 0)) == SEM_FAILED){
-		perror("sem_open");
-		exit(1);
-	}
+	get_sem_by_name(&sem_empty, SEM_EMPTY);
+	get_sem_by_name(&sem_full, SEM_FULL);
 
 	// init shared memory
-	if((shmid = shm_open(SHM_RQ_NAME, O_RDWR, 0666)) < 0){
-		perror("shm_open");
-		exit(1);
-	}
-	if((queue = mmap(NULL, sizeof(struct req_queue), PROT_WRITE, MAP_SHARED, shmid, 0)) == (void *)(-1)){
-		perror("mmap");
-		exit(1);
-	}
+	get_shm_by_name((void **)&queue, SHM_RQ_NAME, sizeof(struct req_queue));
 
 	while(1){
 		// recv request
@@ -214,7 +198,7 @@ void *worker_entry(void *arg)
 	static struct hhrt_item hh_req;
 	static struct sockaddr_in ns_addr;
 	char *ns_server = "202.118.224.101";
-	int shmid, hh_id, old_id;
+	int hh_id, old_id;
 	struct req_queue *queue;
 	struct hhrt_table *hhrt;
 	struct black_list *blist;
@@ -234,46 +218,14 @@ void *worker_entry(void *arg)
 	inet_pton(AF_INET, ns_server, &ns_addr.sin_addr.s_addr);
 
 	// init semaphore
-	if((sem_empty = sem_open(SEM_EMPTY, 0)) == SEM_FAILED){
-		perror("sem_open");
-		exit(1);
-	}
-	if((sem_full = sem_open(SEM_FULL, 0)) == SEM_FAILED){
-		perror("sem_open");
-		exit(1);
-	}
-	if((sem_mutex = sem_open(SEM_MUTEX, 0)) == SEM_FAILED){
-		perror("sem_open");
-		exit(1);
-	}
+	get_sem_by_name(&sem_empty, SEM_EMPTY);
+	get_sem_by_name(&sem_full, SEM_FULL);
+	get_sem_by_name(&sem_mutex, SEM_MUTEX);
 
 	// init shared memory
-	if((shmid = shm_open(SHM_RQ_NAME, O_RDWR, 0666)) < 0){
-		perror("shm_open");
-		exit(1);
-	}
-	if((queue = mmap(NULL, sizeof(struct req_queue), PROT_WRITE, MAP_SHARED, shmid, 0)) == (void *)(-1)){
-		perror("mmap");
-		exit(1);
-	}
-
-	if((shmid = shm_open(SHM_HHRT_NAME, O_RDWR, 0666)) < 0){
-		perror("shm_open");
-		exit(1);
-	}
-	if((hhrt = mmap(NULL, sizeof(struct hhrt_table), PROT_WRITE, MAP_SHARED, shmid, 0)) == (void *)(-1)){
-		perror("mmap");
-		exit(1);
-	}
-
-	if((shmid = shm_open(SHM_BLIST_NAME, O_RDWR, 0666)) < 0){
-		perror("shm_open");
-		exit(1);
-	}
-	if((blist = mmap(NULL, sizeof(struct black_list), PROT_WRITE, MAP_SHARED, shmid, 0)) == (void *)(-1)){
-		perror("mmap");
-		exit(1);
-	}
+	get_shm_by_name((void **)&queue, SHM_RQ_NAME, sizeof(struct req_queue));
+	get_shm_by_name((void **)&hhrt, SHM_HHRT_NAME, sizeof(struct hhrt_table));
+	get_shm_by_name((void **)&blist, SHM_BLIST_NAME, sizeof(struct black_list));
 
 	while(1){
 		sem_wait(sem_full);
