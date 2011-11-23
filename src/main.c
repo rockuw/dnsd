@@ -1,8 +1,3 @@
-#include "req_queue.h"
-#include "protocol.h"
-#include "hhrt.h"
-#include "util.h"
-#include "black_list.h"
 #include <sys/types.h>
 #include <sys/mman.h>
 #include <sys/ipc.h>
@@ -15,16 +10,17 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "common.h"
+#include "req_queue.h"
+#include "protocol.h"
+#include "hhrt.h"
+#include "util.h"
+#include "black_list.h"
+
 #define WORKER_NUMBER	3
 #define RECV_BUFFER_SIZE 1024
-#define SHM_RQ_NAME "/req_shm"		// name for request queue
-#define SHM_HHRT_NAME "/hhrt_shm"	// name for half handled request table
-#define SHM_BLIST_NAME "/blist_shm"	// name for black list
-#define SEM_PSHARED 1				// for sem shared between processes
-#define SEM_MUTEX "/dnsd_sem_mutex"		// sem name for mutex
-#define SEM_EMPTY "/dnsd_sem_empty"		// sem name for empty
-#define SEM_FULL "/dnsd_sem_full"		// sem name for full
 
+// globals
 int g_skt;
 struct sockaddr_in g_saddr;
 
@@ -60,6 +56,7 @@ void init_shm()
 	}
 }
 
+// auxiliary function to get shared memory
 void get_shm_by_name(void **p, const char *name, int size)
 {
 	int shmid;
@@ -91,6 +88,7 @@ void init_socket()
 	}
 }
 
+// auxiliary function for get semaphore
 void get_sem_by_name(sem_t **sem, const char *name)
 {
 	if(((*sem) = sem_open(name, 0)) == SEM_FAILED){
@@ -197,7 +195,6 @@ void *worker_entry(void *arg)
 	static struct req_wrapper wrapper;
 	static struct hhrt_item hh_req;
 	static struct sockaddr_in ns_addr;
-	char *ns_server = "202.118.224.101";
 	int hh_id, old_id;
 	struct req_queue *queue;
 	struct hhrt_table *hhrt;
@@ -215,7 +212,7 @@ void *worker_entry(void *arg)
 	memset((void *)&ns_addr, 0, sizeof(ns_addr));
 	ns_addr.sin_family = AF_INET;
 	ns_addr.sin_port = htons(DNS_PORT);
-	inet_pton(AF_INET, ns_server, &ns_addr.sin_addr.s_addr);
+	inet_pton(AF_INET, HIT_NS_SERVER, &ns_addr.sin_addr.s_addr);
 
 	// init semaphore
 	get_sem_by_name(&sem_empty, SEM_EMPTY);
@@ -238,9 +235,8 @@ void *worker_entry(void *arg)
 		if(msg_is_req(wrapper.buffer, wrapper.len)){
 			// msg is a request
 			old_id = get_msg_id(wrapper.buffer, wrapper.len);
-			/*----------------------*/
-				// add black list lookup
 			get_msg_domain(wrapper.buffer, wrapper.len, domain);
+			// lookup black list
 			if(blist_lookup(blist, domain) >= 0){
 				len = make_error_resp(buffer, UDP_MSG_SIZE);
 				set_msg_id(buffer, len, old_id);
@@ -251,7 +247,6 @@ void *worker_entry(void *arg)
 				continue;
 			}
 
-			/*----------------------*/
 			insert_hhrt(hhrt, hh_id, old_id, &(wrapper.clnt_addr));
 			set_msg_id(wrapper.buffer, wrapper.len, hh_id);
 			// send to NS
