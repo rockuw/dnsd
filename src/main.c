@@ -236,8 +236,12 @@ void *worker_entry(void *arg)
 			// msg is a request
 			old_id = get_msg_id(wrapper.buffer, wrapper.len);
 			get_msg_domain(wrapper.buffer, wrapper.len, domain);
+			// debug
+			printf("request for: %s, id=%d\n", domain, old_id);
 			// lookup black list
 			if(blist_lookup(blist, domain) >= 0){
+				// debug
+				printf("%s BLOCKED!\n", domain);
 				len = make_error_resp(buffer, UDP_MSG_SIZE);
 				set_msg_id(buffer, len, old_id);
 
@@ -261,6 +265,8 @@ void *worker_entry(void *arg)
 			lookup_hhrt(hhrt, hh_id, &hh_req);
 			set_msg_id(wrapper.buffer, wrapper.len, hh_req.old_id);
 
+			// debug
+			printf("response from NS, old_id = %d, new_id = %d\n", hh_req.old_id, hh_id);
 			// send to client
 			if(sendto(g_skt, wrapper.buffer, wrapper.len, 0, (struct sockaddr *)&(hh_req.clnt_addr), sizeof(struct sockaddr)) != wrapper.len){
 				perror("sendto");
