@@ -18,7 +18,7 @@ BIN=bin
 
 main: hhrt.o req_queue.o main.o protocol.o util.o black_list.o
 	cd $(OBJ); \
-	$(CC) $(CFLAGS) $(INCLUDES) hhrt.o req_queue.o main.o protocol.o util.o black_list.o -o ../$(BIN)/$@ $(LIBS)
+	$(CC) $(CFLAGS) $(INCLUDES) $^ -o ../$(BIN)/$@ $(LIBS)
 
 clean:
 	cd obj && rm *.o
