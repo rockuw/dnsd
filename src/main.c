@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <signal.h>
 
 #include "common.h"
 #include "req_queue.h"
@@ -24,36 +25,37 @@
 int g_skt;
 struct sockaddr_in g_saddr;
 
+void create_shm(const char *name, unsigned size);
 void init_shm()
 {
-	int shmid;
 	// create shared memory for req queue
-	if((shmid = shm_open(SHM_RQ_NAME, O_CREAT | O_RDWR, 0666)) < 0){
-		perror("shm_open");
-		exit(1);
-	}
-	if(ftruncate(shmid, sizeof(struct req_queue)) < 0){
-		perror("ftruncate");
-		exit(1);
-	}
+    create_shm(SHM_RQ_NAME, sizeof(struct req_queue));
+
 	// create shared memory for hhrt
-	if((shmid = shm_open(SHM_HHRT_NAME, O_CREAT | O_RDWR, 0666)) < 0){
-		perror("shm_open");
-		exit(1);
-	}
-	if(ftruncate(shmid, sizeof(struct hhrt_table)) < 0){
-		perror("ftruncate");
-		exit(1);
-	}
+    create_shm(SHM_HHRT_NAME, sizeof(struct hhrt_table));
+
 	// create shared memory for blist
-	if((shmid = shm_open(SHM_BLIST_NAME, O_CREAT | O_RDWR, 0666)) < 0){
-		perror("shm_open");
-		exit(1);
+    create_shm(SHM_BLIST_NAME, sizeof(struct black_list));
+}
+
+void create_shm(const char *name, unsigned size)
+{
+	int shmid, is_new = 0;
+
+	// create shared memory for req queue
+	if((shmid = shm_open(name, O_RDWR, 0666)) < 0){
+        is_new = 1; // doesn't exist, create new 
+        if((shmid = shm_open(name, O_CREAT | O_RDWR, 0666)) < 0){
+            perror("shm_open");
+            exit(1);
+        }
 	}
-	if(ftruncate(shmid, sizeof(struct black_list)) < 0){
-		perror("ftruncate");
-		exit(1);
-	}
+    if(is_new){
+        if(ftruncate(shmid, size) < 0){
+            perror("ftruncate");
+            exit(1);
+        }
+    }
 }
 
 // auxiliary function to get shared memory
@@ -188,6 +190,7 @@ void *recver_entry(void *arg)
 			en_queue(queue, &c_addr, buffer, len);
 		sem_post(sem_full);
 	}
+    return NULL;
 }
 
 void *worker_entry(void *arg)
@@ -275,12 +278,21 @@ void *worker_entry(void *arg)
 			}
 		}
 	}
+    return NULL;
+}
+
+pthread_t recv_thread;
+pthread_t worker_threads[WORKER_NUMBER];
+
+void clean_up(int sig)
+{
+    if(sig == SIGINT){
+        printf("bye.\n");
+    }
 }
 
 int main()
 {
-	pthread_t recv_thread;
-	pthread_t worker_threads[WORKER_NUMBER];
 	int worker_numbers[WORKER_NUMBER];
 	int i;
 

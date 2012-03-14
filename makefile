@@ -1,7 +1,7 @@
 VPATH=inc:src
 CFLAGS=-Wall -O -g
 INCLUDES=-I inc
-LIBS=-lrt -pthread
+LIBS= -pthread
 CC=gcc
 
 # dir for objects
